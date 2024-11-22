@@ -4,7 +4,7 @@ FROM node:23-alpine as builder
 WORKDIR /app
 
 # Copy các file cấu hình
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY .env /app/.env
 
 # Cài đặt dependencies
@@ -26,7 +26,6 @@ RUN yarn cache clean
 RUN rm -rf node_modules
 
 RUN yarn --production --frozen-lockfile --no-optional
-RUN yarn autoclean --force
 
 RUN npm prune --production
 
