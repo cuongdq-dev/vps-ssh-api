@@ -1,10 +1,11 @@
 version: '3'
-apiVps:
-    build:
-        context: .
-    environment:
-        - APP_NAME=vps-ssh-api
-    ports:
-        - "5000:5000"
-    env_file:
-        - .env
+services:
+    apiVps:
+        build:
+            context: .
+        environment:
+            - APP_NAME=vps-ssh-api
+        ports:
+            - "5000:5000"
+        env_file:
+            - .env
