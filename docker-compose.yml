@@ -3,7 +3,7 @@ api-vps:
     build:
         context: .
     environment:
-        - APP_NAME=api-vps
+        - APP_NAME=vps-ssh-api
     ports:
         - "5000:5000"
     env_file:
