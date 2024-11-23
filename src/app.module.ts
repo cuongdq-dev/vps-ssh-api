@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { ConfigModule } from '@nestjs/config';
+import { DockerModule } from './docker/docker.module';
 
-@Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
-})
+const modules = [DockerModule];
+
+export const global_modules = [
+  ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env'] }),
+];
+
+@Module({ imports: [...global_modules, ...modules] })
 export class AppModule {}
