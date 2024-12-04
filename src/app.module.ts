@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { DockerModule } from './docker/docker.module';
 
-const modules = [DockerModule];
+const modules = [];
 
 export const global_modules = [
   ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env'] }),
