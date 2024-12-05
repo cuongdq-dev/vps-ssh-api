@@ -1,97 +1,66 @@
-import { Injectable } from '@nestjs/common';
-import { Client, ConnectConfig } from 'ssh2';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { NodeSSH } from 'node-ssh';
 import { ServerStatusDto, ServiceStatusDto } from './dto/server.dto';
 
 @Injectable()
 export class ServerService {
-  private clients: Record<string, Client> = {};
+  private clients: Record<string, NodeSSH> = {}; // Thay vì 1 client, sử dụng nhiều client
 
-  /**
-   * Kết nối tới server SSH và trả về connectionId
-   * @param host - Địa chỉ host của server
-   * @param username - Tên đăng nhập
-   * @param password - Mật khẩu đăng nhập
-   */
+  // Kết nối SSH với mỗi client
   async connect(
     host: string,
     username: string,
     password: string,
   ): Promise<string> {
-    const client = new Client();
-    const connectionId = `${host}_${username}`;
-    const config: ConnectConfig = { host, username, password };
-
-    return new Promise<string>((resolve, reject) => {
-      client
-        .on('ready', () => {
-          console.log(`SSH connected to ${host}`);
-          this.clients[connectionId] = client;
-          resolve(connectionId); // Trả về connectionId sau khi kết nối thành công
-        })
-        .on('error', (err) => {
-          console.error(`SSH connection error: ${err.message}`);
-          reject(err);
-        })
-        .connect(config);
-    });
-  }
-
-  /**
-   * Thực thi lệnh SSH và trả về kết quả
-   * @param connectionId - connectionId của kết nối cần sử dụng
-   * @param command - Lệnh cần thực thi
-   */
-  async executeCommand(connectionId: string, command: string): Promise<string> {
-    const client = this.clients[connectionId];
-    if (!client) throw new Error('Connection not found');
-
-    return new Promise<string>((resolve, reject) => {
-      client.exec(command, (err, stream) => {
-        if (err) return reject(err);
-
-        let output = '';
-        stream
-          .on('data', (data) => (output += data.toString()))
-          .stderr.on('data', (data) => (output += data.toString()))
-          .on('close', () => resolve(output.trim()));
+    try {
+      const ssh = new NodeSSH();
+      await ssh.connect({
+        host,
+        username,
+        password,
       });
-    });
-  }
 
-  /**
-   * Ngắt kết nối SSH
-   * @param connectionId - connectionId của kết nối cần ngắt
-   */
-  disconnect(connectionId: string): void {
-    const client = this.clients[connectionId];
-    if (client) {
-      client.end();
-      delete this.clients[connectionId]; // Xóa kết nối khỏi danh sách khi ngắt
+      const connectionId = `${host}_${username}`;
+      this.clients[connectionId] = ssh; // Lưu kết nối vào clients
+      console.log(`SSH connected to ${host}`);
+      return connectionId;
+    } catch (err) {
+      console.error(`SSH connection error: ${err.message}`);
+      throw err;
     }
   }
 
-  /**
-   * Lấy trạng thái tài nguyên của server
-   * @param connectionId - connectionId của kết nối SSH
-   */
+  // Thực thi lệnh SSH trên kết nối đã lưu
+  async executeCommand(connectionId: string, command: string) {
+    const client = this.clients[connectionId];
+    if (!client) throw new BadRequestException('Connection not found');
 
-  private async executeCommandAsync(
-    client: Client,
-    command: string,
-  ): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      client.exec(command, (err, stream) => {
-        if (err) return reject(err);
+    try {
+      const result = await client.execCommand(command);
 
-        let output = '';
-        stream
-          .on('data', (data) => (output += data.toString()))
-          .stderr.on('data', (data) => (output += data.toString()))
-          .on('close', () => resolve(output.trim()));
-      });
-    });
+      if (result.code !== 0) {
+        throw new BadRequestException(result.stderr);
+      }
+      return {
+        status: 200,
+        data: result.stdout.trim(),
+      };
+    } catch (err) {
+      throw new BadRequestException(`${err.message || err}`);
+    }
   }
 
+  // Ngắt kết nối SSH
+  disconnect(connectionId: string): void {
+    const client = this.clients[connectionId];
+    if (client) {
+      client.dispose();
+      delete this.clients[connectionId];
+      console.log(`SSH connection closed for ${connectionId}`);
+    }
+  }
+
+  // Lấy thông tin trạng thái server
   async serverStatus(connectionId: string): Promise<ServerStatusDto> {
     const client = this.clients[connectionId];
     if (!client) throw new Error('Connection not found');
@@ -99,39 +68,35 @@ export class ServerService {
     const ramCommand = 'free -m';
     const cpuCommand = "top -bn1 | grep 'Cpu(s)'";
     const diskCommand = 'df -h --total | grep total';
-    const services = ['nginx', 'docker', 'psql', 'mongod']; // Các service cần kiểm tra
+    const services = ['nginx', 'docker', 'psql', 'mongod'];
 
     const serviceCommands = services.map((service) => `which ${service}`);
-    const netstatCommand = 'ss -tuln'; // Lệnh xem các cổng đang lắng nghe
+    const netstatCommand = 'ss -tuln';
 
-    // Thực hiện các lệnh đồng thời
     const [ramInfo, cpuInfo, diskInfo, serviceInfos, netstatInfo] =
       await Promise.all([
-        this.executeCommandAsync(client, ramCommand),
-        this.executeCommandAsync(client, cpuCommand),
-        this.executeCommandAsync(client, diskCommand),
+        client.execCommand(ramCommand),
+        client.execCommand(cpuCommand),
+        client.execCommand(diskCommand),
         Promise.all(
-          serviceCommands.map((command) =>
-            this.executeCommandAsync(client, command),
-          ),
+          serviceCommands.map((command) => client.execCommand(command)),
         ),
-        this.executeCommandAsync(client, netstatCommand),
+        client.execCommand(netstatCommand),
       ]);
 
-    // Kiểm tra các dịch vụ đã được cài đặt và lấy thông tin chi tiết
     const serviceStatus = await Promise.all(
       services.map((service, index) =>
         this.parseServiceInfo(
+          connectionId,
           service,
-          serviceInfos[index],
-          client,
-          netstatInfo,
+          serviceInfos[index].stdout,
+          netstatInfo.stdout,
         ),
       ),
     );
-    const ram = this.parseRamInfo(ramInfo);
-    const cpu = this.parseCpuInfo(cpuInfo);
-    const disk = this.parseDiskInfo(diskInfo);
+    const ram = this.parseRamInfo(ramInfo.stdout);
+    const cpu = this.parseCpuInfo(cpuInfo.stdout);
+    const disk = this.parseDiskInfo(diskInfo.stdout);
 
     return {
       categories: ['ram', 'cpu', 'disk'],
@@ -142,46 +107,27 @@ export class ServerService {
     };
   }
 
+  // Lấy thông tin trạng thái dịch vụ
   async getService(
     connectionId: string,
     service: string,
   ): Promise<ServiceStatusDto> {
     const client = this.clients[connectionId];
     if (!client) throw new Error('Connection not found');
-    const netstatCommand = 'ss -tuln'; // Lệnh xem các cổng đang lắng nghe
 
-    const [netstatInfo] = await Promise.all([
-      this.executeCommandAsync(client, netstatCommand),
-    ]);
+    const netstatCommand = 'ss -tuln';
+    const netstatInfo = await client.execCommand(netstatCommand);
+    const serviceInfo = await client.execCommand(`which ${service}`);
 
-    switch (service) {
-      case 'postgresql':
-        const psqlInfo = await this.executeCommandAsync(client, `which psql`);
-
-        return await this.parseServiceInfo(
-          service,
-          psqlInfo,
-          client,
-          netstatInfo,
-        );
-
-      default:
-        const serviceInfo = await this.executeCommandAsync(
-          client,
-          `which ${service}`,
-        );
-
-        return await this.parseServiceInfo(
-          service,
-          serviceInfo,
-          client,
-          netstatInfo,
-        );
-    }
+    return await this.parseServiceInfo(
+      connectionId,
+      service,
+      serviceInfo.stdout,
+      netstatInfo.stdout,
+    );
   }
 
-  // FUNCTION:
-
+  // Hàm phân tích thông tin RAM
   private parseRamInfo(data: string) {
     const lines = data.split('\n');
     const memLine = lines.find((line) => line.includes('Mem:')) || '';
@@ -192,6 +138,7 @@ export class ServerService {
     };
   }
 
+  // Hàm phân tích thông tin CPU
   private parseCpuInfo(data: string) {
     const usage = data.match(/(\d+\.\d+)\s+us/);
     const used = usage ? parseFloat(usage[1]) : 0;
@@ -201,6 +148,7 @@ export class ServerService {
     };
   }
 
+  // Hàm phân tích thông tin đĩa
   private parseDiskInfo(data: string) {
     const [_, total, used, available] = data.split(/\s+/);
     return {
@@ -208,54 +156,49 @@ export class ServerService {
       available: parseFloat(available.replace('G', '')),
     };
   }
+
+  // Phân tích thông tin trạng thái dịch vụ
   private async parseServiceInfo(
+    connectionId: string,
     service: string,
     serviceInfo: string,
-    client: Client,
     netstatInfo: string,
   ): Promise<ServiceStatusDto> {
     const isInstalled = serviceInfo.trim() !== '';
     let port = '';
     let memoryUsage = 'N/A';
-    let isActive = false; // Biến để lưu trạng thái dịch vụ (active hoặc inactive)
+    let isActive = false;
 
     if (isInstalled) {
-      // Kiểm tra thông tin cổng của dịch vụ qua netstat
       const servicePortMatch = netstatInfo.match(new RegExp(`.*:${service}.*`));
       if (servicePortMatch) {
-        port = servicePortMatch[0].split(' ')[3]; // Lấy cổng từ output của netstat
+        port = servicePortMatch[0].split(' ')[3];
       }
 
-      // Kiểm tra trạng thái hoạt động của dịch vụ qua systemctl
-      const systemctlStatus = await this.executeCommandAsync(
-        client,
+      const systemctlStatus = await this.clients[connectionId].execCommand(
         `systemctl is-active ${service === 'psql' ? 'postgresql' : service}`,
       );
-      isActive = systemctlStatus.trim() === 'active'; // Nếu trạng thái là 'active', thì dịch vụ đang hoạt động
+      isActive = systemctlStatus.stdout.trim() === 'active';
 
-      // Nếu là Docker, lấy thông tin bộ nhớ sử dụng của Docker container
       if (service === 'docker') {
-        const dockerStats = await this.executeCommandAsync(
-          client,
+        const dockerStats = await this.clients[connectionId].execCommand(
           'docker stats --no-stream --format "{{.MemUsage}}"',
         );
-        memoryUsage = dockerStats.trim();
+        memoryUsage = dockerStats.stdout.trim();
       } else {
-        // Lấy dung lượng bộ nhớ của các dịch vụ còn lại
-        const serviceSize = await this.executeCommandAsync(
-          client,
+        const serviceSize = await this.clients[connectionId].execCommand(
           `du -sh /var/lib/${service}`,
         );
-        memoryUsage = serviceSize.split('\t')[0]; // Lấy dung lượng của thư mục cài đặt dịch vụ
+        memoryUsage = serviceSize.stdout.split('\t')[0];
       }
     }
 
     return {
       service,
       is_installed: isInstalled,
-      is_active: isActive, // Trạng thái hoạt động của dịch vụ
+      is_active: isActive,
       port,
-      memory_usage: memoryUsage,
+      memory_usage: 'Memory Usage - ' + memoryUsage,
     };
   }
 }

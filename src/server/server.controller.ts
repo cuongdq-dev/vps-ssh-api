@@ -13,9 +13,7 @@ export class ServerController {
   }
 
   @Get('status/:connectionId')
-  async getServerStatus(
-    @Param('connectionId') connectionId: string,
-  ): Promise<ServerStatusDto> {
+  async getServerStatus(@Param('connectionId') connectionId: string) {
     return this.serverService.serverStatus(connectionId);
   }
 
@@ -23,7 +21,7 @@ export class ServerController {
   async getService(
     @Param('connectionId') connectionId: string,
     @Body() { service }: { service: string },
-  ): Promise<{ service: string }> {
+  ) {
     return this.serverService.getService(connectionId, service);
   }
 
@@ -31,7 +29,7 @@ export class ServerController {
   async execute(
     @Param('connectionId') connectionId: string,
     @Body() { command }: { command: string },
-  ): Promise<string> {
+  ) {
     return this.serverService.executeCommand(connectionId, command);
   }
 
