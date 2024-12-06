@@ -5,10 +5,6 @@ import { ServerStatusDto, ServiceStatusDto } from './dto/server.dto';
 @Injectable()
 export class ServerService {
   public clients: Record<string, NodeSSH> = {};
-  // public config: Record<
-  //   string,
-  //   { host: string; username: string; password: string; owner_id: string }
-  // > = {};
 
   async connect(
     host: string,
@@ -21,7 +17,6 @@ export class ServerService {
       await ssh.connect({ host, username, password });
       const connectionId = `${owner_id}_${host}_${username}`;
       this.clients[connectionId] = ssh;
-      // this.config[connectionId] = { host, username, password, owner_id };
       return { status: 200, connectionId: connectionId };
     } catch (err) {
       throw new BadRequestException(err.message || err);
@@ -41,7 +36,6 @@ export class ServerService {
     }
   }
 
-  // Ngắt kết nối SSH
   disconnect(connectionId: string): void {
     const client = this.clients[connectionId];
     if (client) {
@@ -50,7 +44,6 @@ export class ServerService {
       console.log(`SSH connection closed for ${connectionId}`);
     }
   }
-  // Tạm
   async executeTemporaryCommand(sshConfig: Config, command: string) {
     const temporarySsh = new NodeSSH();
     try {
@@ -69,7 +62,6 @@ export class ServerService {
     }
   }
 
-  // Lấy thông tin trạng thái server
   async serverStatus(connectionId: string): Promise<ServerStatusDto> {
     const client = this.clients[connectionId];
     if (!client) throw new Error('Connection not found');
@@ -116,7 +108,6 @@ export class ServerService {
     };
   }
 
-  // Lấy thông tin trạng thái dịch vụ
   async getService(
     connectionId: string,
     service: string,
@@ -136,7 +127,6 @@ export class ServerService {
     );
   }
 
-  // Hàm phân tích thông tin RAM
   private parseRamInfo(data: string) {
     const lines = data.split('\n');
     const memLine = lines.find((line) => line.includes('Mem:')) || '';
@@ -147,7 +137,6 @@ export class ServerService {
     };
   }
 
-  // Hàm phân tích thông tin CPU
   private parseCpuInfo(data: string) {
     const usage = data.match(/(\d+\.\d+)\s+us/);
     const used = usage ? parseFloat(usage[1]) : 0;
@@ -157,7 +146,6 @@ export class ServerService {
     };
   }
 
-  // Hàm phân tích thông tin đĩa
   private parseDiskInfo(data: string) {
     const [_, total, used, available] = data.split(/\s+/);
     return {
@@ -166,7 +154,6 @@ export class ServerService {
     };
   }
 
-  // Phân tích thông tin trạng thái dịch vụ
   private async parseServiceInfo(
     connectionId: string,
     service: string,
