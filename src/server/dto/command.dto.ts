@@ -12,4 +12,8 @@ export class CommandDto {
   @IsString()
   @IsNotEmpty()
   password: string;
+
+  @IsString()
+  @IsNotEmpty()
+  owner_id: string;
 }

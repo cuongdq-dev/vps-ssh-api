@@ -1,50 +1,41 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { NodeSSH } from 'node-ssh';
+import { NodeSSH, Config, SSHExecCommandResponse } from 'node-ssh';
 import { ServerStatusDto, ServiceStatusDto } from './dto/server.dto';
 
 @Injectable()
 export class ServerService {
-  private clients: Record<string, NodeSSH> = {}; // Thay vì 1 client, sử dụng nhiều client
+  public clients: Record<string, NodeSSH> = {};
+  // public config: Record<
+  //   string,
+  //   { host: string; username: string; password: string; owner_id: string }
+  // > = {};
 
-  // Kết nối SSH với mỗi client
   async connect(
     host: string,
     username: string,
     password: string,
-  ): Promise<string> {
+    owner_id: string,
+  ) {
     try {
       const ssh = new NodeSSH();
-      await ssh.connect({
-        host,
-        username,
-        password,
-      });
-
-      const connectionId = `${host}_${username}`;
-      this.clients[connectionId] = ssh; // Lưu kết nối vào clients
-      console.log(`SSH connected to ${host}`);
-      return connectionId;
+      await ssh.connect({ host, username, password });
+      const connectionId = `${owner_id}_${host}_${username}`;
+      this.clients[connectionId] = ssh;
+      // this.config[connectionId] = { host, username, password, owner_id };
+      return { status: 200, connectionId: connectionId };
     } catch (err) {
-      console.error(`SSH connection error: ${err.message}`);
-      throw err;
+      throw new BadRequestException(err.message || err);
     }
   }
 
-  // Thực thi lệnh SSH trên kết nối đã lưu
   async executeCommand(connectionId: string, command: string) {
     const client = this.clients[connectionId];
     if (!client) throw new BadRequestException('Connection not found');
 
     try {
       const result = await client.execCommand(command);
-
-      if (result.code !== 0) {
-        throw new BadRequestException(result.stderr);
-      }
-      return {
-        status: 200,
-        data: result.stdout.trim(),
-      };
+      if (result.code !== 0) throw new BadRequestException(result.stderr);
+      return { status: 200, data: result.stdout.trim() };
     } catch (err) {
       throw new BadRequestException(`${err.message || err}`);
     }
@@ -57,6 +48,24 @@ export class ServerService {
       client.dispose();
       delete this.clients[connectionId];
       console.log(`SSH connection closed for ${connectionId}`);
+    }
+  }
+  // Tạm
+  async executeTemporaryCommand(sshConfig: Config, command: string) {
+    const temporarySsh = new NodeSSH();
+    try {
+      await temporarySsh.connect(sshConfig);
+      console.log(command);
+      const result = await temporarySsh.execCommand(command);
+
+      if (result.code !== 0) throw new BadRequestException(result.stderr);
+      return { status: 200, data: result.stdout.trim() };
+    } catch (err) {
+      throw new BadRequestException(
+        `Error executing temporary command: ${err.message || err}`,
+      );
+    } finally {
+      temporarySsh.dispose();
     }
   }
 

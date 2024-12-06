@@ -1,6 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { CommandDto } from './dto/command.dto';
-import { ServerStatusDto } from './dto/server.dto';
 import { ServerService } from './server.service';
 
 @Controller('server')
@@ -8,8 +7,8 @@ export class ServerController {
   constructor(private readonly serverService: ServerService) {}
 
   @Post('connect')
-  connect(@Body() { host, username, password }: CommandDto): Promise<string> {
-    return this.serverService.connect(host, username, password);
+  connect(@Body() { owner_id, host, username, password }: CommandDto) {
+    return this.serverService.connect(host, username, password, owner_id);
   }
 
   @Get('status/:connectionId')

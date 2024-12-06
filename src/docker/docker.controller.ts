@@ -28,6 +28,22 @@ export class DockerController {
     );
   }
 
+  @Post('image/:connectionId/build')
+  async buildImage(
+    @Param('connectionId') connectionId: string,
+    @Body('github_url') github_url: string,
+    @Body('fine_grained_token') fine_grained_token: string,
+    @Body('username') username: string,
+    @Body('repository_name') repository_name: string,
+  ) {
+    return await this.dockerService.buildImage(connectionId, {
+      fine_grained_token,
+      repository_name,
+      github_url,
+      username,
+    });
+  }
+
   @Delete('image/:connectionId/:imageName')
   async upContainer(
     @Param('connectionId') connectionId: string,
