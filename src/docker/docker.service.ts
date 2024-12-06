@@ -100,7 +100,7 @@ export class DockerService {
   ) {
     const { repository_name, fine_grained_token, github_url, username } = body;
 
-    const baseFolder = 'projects-test';
+    const baseFolder = 'projects';
     const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
 
     const command = `
