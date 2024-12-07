@@ -48,7 +48,7 @@ export class ServerService {
     const temporarySsh = new NodeSSH();
     try {
       await temporarySsh.connect(sshConfig);
-      console.log(command);
+
       const result = await temporarySsh.execCommand(command);
 
       if (result.code !== 0) throw new BadRequestException(result.stderr);

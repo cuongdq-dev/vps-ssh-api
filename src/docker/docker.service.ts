@@ -7,8 +7,7 @@ export class DockerService {
   constructor(private readonly serverService: ServerService) {}
 
   async listContainers(connectionId: string) {
-    const command =
-      'docker ps -a --format "{{.ID}} {{.Names}} {{.Image}} {{.Status}}"';
+    const command = 'docker ps -a --format "{{json .}}"';
     const existingClient = this.serverService.clients[connectionId];
     if (!existingClient) throw new BadRequestException('Connection not found');
     try {
@@ -18,10 +17,21 @@ export class DockerService {
       );
       if (!result) return [];
 
-      return result.data.split('\n').map((line) => {
-        const [id, name, image, ...status] = line.split(' ');
-        return { id, name, image, status: status.join(' ') };
-      });
+      const containers = result.data
+        .split('\n')
+        .map((container) => JSON.parse(container))
+        .map((container) => ({
+          id: container.ID,
+          name: container.Names,
+          image: container.Image,
+          ports: container.Ports,
+          state: container.State,
+          status: container.Status,
+          running_for: container.RunningFor,
+          created_at: container.CreatedSince,
+        }));
+
+      return containers;
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -29,7 +39,9 @@ export class DockerService {
 
   async listImagesWithStatus(connectionId: string) {
     const imagesCommand = 'docker images --format "{{json .}}"';
-    const containersCommand = 'docker ps --format "{{.Image}}"';
+    const containersCommand =
+      'docker ps -a --format "{{.ID}} {{.Image}} {{.Names}}"';
+
     const existingClient = this.serverService.clients[connectionId];
     if (!existingClient) throw new BadRequestException('Connection not found');
     try {
@@ -55,13 +67,28 @@ export class DockerService {
         containersCommand,
       );
 
-      const runningImages = containersResult
-        ? containersResult.data.split('\n')
+      const runningContainers = containersResult
+        ? containersResult.data.split('\n').map((line) => {
+            const [containerId, imageName, containerName] = line.split(' ');
+            return { containerId, imageName, containerName };
+          })
         : [];
-      return images.map((image) => ({
-        ...image,
-        status: runningImages.includes(image.name) ? 'In use' : 'Unused',
-      }));
+
+      return images.map((image) => {
+        const runningContainer = runningContainers.find(
+          (container) =>
+            container.imageName === image.name ||
+            container.imageName === image.id,
+        );
+        return {
+          ...image,
+          status: runningContainer ? 'In use' : 'Unused',
+          container_id: runningContainer ? runningContainer.containerId : null,
+          container_name: runningContainer
+            ? runningContainer.containerName
+            : null,
+        };
+      });
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -73,7 +100,7 @@ export class DockerService {
     containerName?: string,
   ) {
     const command = containerName
-      ? `docker run -d --name ${containerName} ${imageName}`
+      ? `docker-compose `
       : `docker run -d ${imageName}`;
 
     const existingClient = this.serverService.clients[connectionId];
@@ -148,19 +175,201 @@ export class DockerService {
   }
 
   // TODO
+  async startContainer(connectionId: string, containerId: string) {
+    const command = `docker start ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
 
-  async restartContainer(connectionId: string, imageContainer: string) {
-    const command = `docker restart ${imageContainer}`;
-    return await this.serverService.executeCommand(connectionId, command);
+      // Lấy thông tin của container sau khi start
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+      // Lấy kết quả đầu tiên từ docker inspect
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
   }
 
-  async stopContainer(connectionId: string, containerName: string) {
-    const command = `docker stop ${containerName}`;
-    return await this.serverService.executeCommand(connectionId, command);
+  async pauseContainer(connectionId: string, containerId: string) {
+    const command = `docker pause ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
+
+      // Lấy thông tin của container sau khi pause
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
   }
 
-  async startContainer(connectionId: string, containerName: string) {
-    const command = `docker start ${containerName}`;
-    return await this.serverService.executeCommand(connectionId, command);
+  async stopContainer(connectionId: string, containerId: string) {
+    const command = `docker stop ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
+
+      // Lấy thông tin của container sau khi stop
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async restartContainer(connectionId: string, containerId: string) {
+    const command = `docker restart ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
+
+      // Lấy thông tin của container sau khi restart
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async removeContainer(connectionId: string, containerId: string) {
+    const command = `docker rm ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
+
+      // Lấy thông tin của container sau khi remove
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async resumeContainer(connectionId: string, containerId: string) {
+    const command = `docker unpause ${containerId}`;
+    const existingClient = this.serverService.clients[connectionId];
+    if (!existingClient) throw new BadRequestException('Connection not found');
+    try {
+      await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        command.trim(),
+      );
+
+      // Lấy thông tin của container sau khi resume
+      const result = await this.serverService.executeTemporaryCommand(
+        existingClient.connection.config as Config,
+        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
+      );
+
+      const container = JSON.parse(result.data.trim());
+
+      return {
+        id: container.ID,
+        name: container.Names,
+        image: container.Image,
+        ports: container.Ports,
+        state: container.State,
+        status: container.Status,
+        running_for: container.RunningFor,
+        created_at: container.CreatedSince,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
   }
 }
