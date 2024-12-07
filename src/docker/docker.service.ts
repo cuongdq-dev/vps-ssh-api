@@ -317,24 +317,7 @@ export class DockerService {
         command.trim(),
       );
 
-      // Lấy thông tin của container sau khi remove
-      const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
-        `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
-      );
-
-      const container = JSON.parse(result.data.trim());
-
-      return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
-      };
+      return { status: 200 };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
