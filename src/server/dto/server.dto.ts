@@ -11,5 +11,4 @@ export class ServerStatusDto {
   used: number[]; // Dữ liệu đã sử dụng
   available: number[]; // Dữ liệu còn lại
   units: string[]; // Đơn vị của từng loại tài nguyên
-  services: ServiceStatusDto[]; // Danh sách các dịch vụ và trạng thái của chúng
 }

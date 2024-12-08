@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { NodeSSH, Config, SSHExecCommandResponse } from 'node-ssh';
+import { Config, NodeSSH } from 'node-ssh';
 import { ServerStatusDto, ServiceStatusDto } from './dto/server.dto';
 
 @Injectable()
@@ -25,7 +25,8 @@ export class ServerService {
 
   async executeCommand(connectionId: string, command: string) {
     const client = this.clients[connectionId];
-    if (!client) throw new BadRequestException('Connection not found');
+    if (!client.isConnected())
+      throw new BadRequestException('Connection not found');
 
     try {
       const result = await client.execCommand(command);
@@ -44,10 +45,17 @@ export class ServerService {
       console.log(`SSH connection closed for ${connectionId}`);
     }
   }
-  async executeTemporaryCommand(sshConfig: Config, command: string) {
+  async executeTemporaryCommand(connectionId: string, command: string) {
+    const client = this.clients[connectionId];
+    const clientConfig = client.connection.config as Config;
+
+    if (!client.isConnected())
+      throw new BadRequestException('Connection not found');
+
     const temporarySsh = new NodeSSH();
+
     try {
-      await temporarySsh.connect(sshConfig);
+      await temporarySsh.connect(clientConfig);
 
       const result = await temporarySsh.execCommand(command);
 
@@ -63,48 +71,25 @@ export class ServerService {
   }
 
   async serverStatus(connectionId: string): Promise<ServerStatusDto> {
-    const client = this.clients[connectionId];
-    if (!client) throw new Error('Connection not found');
-
     const ramCommand = 'free -m';
     const cpuCommand = "top -bn1 | grep 'Cpu(s)'";
     const diskCommand = 'df -h --total | grep total';
-    const services = ['nginx', 'docker', 'psql', 'mongod'];
 
-    const serviceCommands = services.map((service) => `which ${service}`);
-    const netstatCommand = 'ss -tuln';
+    const [ramInfo, cpuInfo, diskInfo] = await Promise.all([
+      this.executeTemporaryCommand(connectionId, ramCommand),
+      this.executeTemporaryCommand(connectionId, cpuCommand),
+      this.executeTemporaryCommand(connectionId, diskCommand),
+    ]);
 
-    const [ramInfo, cpuInfo, diskInfo, serviceInfos, netstatInfo] =
-      await Promise.all([
-        client.execCommand(ramCommand),
-        client.execCommand(cpuCommand),
-        client.execCommand(diskCommand),
-        Promise.all(
-          serviceCommands.map((command) => client.execCommand(command)),
-        ),
-        client.execCommand(netstatCommand),
-      ]);
-
-    const serviceStatus = await Promise.all(
-      services.map((service, index) =>
-        this.parseServiceInfo(
-          connectionId,
-          service,
-          serviceInfos[index].stdout,
-          netstatInfo.stdout,
-        ),
-      ),
-    );
-    const ram = this.parseRamInfo(ramInfo.stdout);
-    const cpu = this.parseCpuInfo(cpuInfo.stdout);
-    const disk = this.parseDiskInfo(diskInfo.stdout);
+    const ram = this.parseRamInfo(ramInfo.data);
+    const cpu = this.parseCpuInfo(cpuInfo.data);
+    const disk = this.parseDiskInfo(diskInfo.data);
 
     return {
       categories: ['ram', 'cpu', 'disk'],
       used: [ram.used, cpu.used, disk.used],
       available: [ram.available, cpu.available, disk.available],
       units: ['MB', '%', 'GB'],
-      services: serviceStatus,
     };
   }
 
@@ -112,18 +97,21 @@ export class ServerService {
     connectionId: string,
     service: string,
   ): Promise<ServiceStatusDto> {
-    const client = this.clients[connectionId];
-    if (!client) throw new Error('Connection not found');
-
     const netstatCommand = 'ss -tuln';
-    const netstatInfo = await client.execCommand(netstatCommand);
-    const serviceInfo = await client.execCommand(`which ${service}`);
+    const netstatInfo = await this.executeTemporaryCommand(
+      connectionId,
+      netstatCommand,
+    );
+    const serviceInfo = await this.executeTemporaryCommand(
+      connectionId,
+      `which ${service === 'postgresql' ? 'psql' : service}`,
+    );
 
     return await this.parseServiceInfo(
       connectionId,
       service,
-      serviceInfo.stdout,
-      netstatInfo.stdout,
+      serviceInfo.data,
+      netstatInfo.data,
     );
   }
 
@@ -171,21 +159,24 @@ export class ServerService {
         port = servicePortMatch[0].split(' ')[3];
       }
 
-      const systemctlStatus = await this.clients[connectionId].execCommand(
+      const systemctlStatus = await this.executeTemporaryCommand(
+        connectionId,
         `systemctl is-active ${service === 'psql' ? 'postgresql' : service}`,
       );
-      isActive = systemctlStatus.stdout.trim() === 'active';
+      isActive = systemctlStatus?.data?.trim() === 'active';
 
       if (service === 'docker') {
-        const dockerStats = await this.clients[connectionId].execCommand(
+        const dockerStats = await this.executeTemporaryCommand(
+          connectionId,
           'docker stats --no-stream --format "{{.MemUsage}}"',
         );
-        memoryUsage = dockerStats.stdout.trim();
+        memoryUsage = dockerStats?.data?.trim();
       } else {
-        const serviceSize = await this.clients[connectionId].execCommand(
+        const serviceSize = await this.executeTemporaryCommand(
+          connectionId,
           `du -sh /var/lib/${service}`,
         );
-        memoryUsage = serviceSize.stdout.split('\t')[0];
+        memoryUsage = serviceSize?.data?.split('\t')[0];
       }
     }
 

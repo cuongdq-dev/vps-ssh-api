@@ -27,13 +27,25 @@ export class DockerController {
   async runImage(
     @Param('connectionId') connectionId: string,
     @Body('imageName') imageName: string,
+    @Body('imageId') imageId: string,
+    @Body('imageTag') imageTag: string,
+    @Body('hostPort') hostPort: string,
+    @Body('containerPort') containerPort: string,
     @Body('containerName') containerName: string,
+    @Body('volumes') volumes?: { hostPath: string; containerPath: string }[],
+    @Body('envVariables') envVariables?: { key: string; value: string }[],
   ) {
-    return await this.dockerService.runImage(
-      connectionId,
+    const body = {
       imageName,
+      imageId,
       containerName,
-    );
+      volumes,
+      imageTag,
+      envVariables,
+      hostPort,
+      containerPort,
+    };
+    return await this.dockerService.runImage(connectionId, body);
   }
 
   @Post('image/build/:connectionId')

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ServerService } from '../server/server.service';
-import { Config } from 'node-ssh';
+import { RunDockerDto } from './dto/docker.dto';
 
 @Injectable()
 export class DockerService {
@@ -8,11 +8,9 @@ export class DockerService {
 
   async listContainers(connectionId: string) {
     const command = 'docker ps -a --format "{{json .}}"';
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
       if (!result) return [];
@@ -42,11 +40,9 @@ export class DockerService {
     const containersCommand =
       'docker ps -a --format "{{.ID}} {{.Image}} {{.Names}}"';
 
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       const imagesResult = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         imagesCommand.trim(),
       );
       if (!imagesResult) return [];
@@ -62,7 +58,7 @@ export class DockerService {
           created: image.CreatedSince,
         }));
 
-      const containersResult = await this.serverService.executeCommand(
+      const containersResult = await this.serverService.executeTemporaryCommand(
         connectionId,
         containersCommand,
       );
@@ -94,20 +90,41 @@ export class DockerService {
     }
   }
 
-  async runImage(
-    connectionId: string,
-    imageName: string,
-    containerName?: string,
-  ) {
-    const command = containerName
-      ? `docker-compose `
-      : `docker run -d ${imageName}`;
+  async runImage(connectionId: string, body: RunDockerDto) {
+    const {
+      imageName,
+      imageId,
+      imageTag,
+      containerPort,
+      hostPort,
+      containerName,
+      volumes,
+      envVariables,
+    } = body;
 
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
+    const volumeOptions = volumes
+      .map(({ hostPath, containerPath }) => {
+        if (!hostPath || !containerPath) return null;
+        return `-v ${hostPath}:${containerPath}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+
+    const envOptions = envVariables
+      .map(({ key, value }) => {
+        if (!key || !value) return null;
+        return `-e ${key}=${value}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+
+    const command =
+      `docker run -d ${hostPort && containerPort ? '-p ' + hostPort + ':' + containerPort : ''} ${containerName ? '--name ' + containerName : ''} ${volumeOptions} ${envOptions} ${imageName}:${imageTag}`.trim();
+
     try {
+      console.log(command);
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
       return result;
@@ -146,11 +163,9 @@ export class DockerService {
       cd "$CURRENT_DIR"
     `;
 
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
       return result;
@@ -161,11 +176,9 @@ export class DockerService {
 
   async deleteImage(connectionId: string, imageName: string) {
     const command = `docker rmi ${imageName}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
       return result;
@@ -177,22 +190,18 @@ export class DockerService {
   // TODO
   async startContainer(connectionId: string, containerId: string) {
     const command = `docker start ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
-      // Lấy thông tin của container sau khi start
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
       const container = JSON.parse(result.data.trim());
-      // Lấy kết quả đầu tiên từ docker inspect
       return {
         id: container.ID,
         name: container.Names,
@@ -210,17 +219,15 @@ export class DockerService {
 
   async pauseContainer(connectionId: string, containerId: string) {
     const command = `docker pause ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
       // Lấy thông tin của container sau khi pause
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
@@ -243,17 +250,15 @@ export class DockerService {
 
   async stopContainer(connectionId: string, containerId: string) {
     const command = `docker stop ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
       // Lấy thông tin của container sau khi stop
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
@@ -276,17 +281,16 @@ export class DockerService {
 
   async restartContainer(connectionId: string, containerId: string) {
     const command = `docker restart ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
+
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
       // Lấy thông tin của container sau khi restart
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
@@ -309,11 +313,10 @@ export class DockerService {
 
   async removeContainer(connectionId: string, containerId: string) {
     const command = `docker rm ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
+
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
@@ -325,17 +328,16 @@ export class DockerService {
 
   async resumeContainer(connectionId: string, containerId: string) {
     const command = `docker unpause ${containerId}`;
-    const existingClient = this.serverService.clients[connectionId];
-    if (!existingClient) throw new BadRequestException('Connection not found');
+
     try {
       await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         command.trim(),
       );
 
       // Lấy thông tin của container sau khi resume
       const result = await this.serverService.executeTemporaryCommand(
-        existingClient.connection.config as Config,
+        connectionId,
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
