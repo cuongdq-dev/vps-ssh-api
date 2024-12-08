@@ -13,7 +13,7 @@ export class DockerService {
         connectionId,
         command.trim(),
       );
-      if (!result) return [];
+      if (!result || !result.data) return [];
 
       const containers = result.data
         .split('\n')
@@ -45,7 +45,7 @@ export class DockerService {
         connectionId,
         imagesCommand.trim(),
       );
-      if (!imagesResult) return [];
+      if (!imagesResult || !imagesResult.data) return [];
 
       const images = imagesResult.data
         .split('\n')
@@ -159,7 +159,12 @@ export class DockerService {
       else \
         cd "${sanitizedRepoName}" && git pull && cd ..; \
       fi && \
-      cd "${sanitizedRepoName}" && docker-compose build && \
+      cd "${sanitizedRepoName}" && \
+      if [ -f "docker-compose.yml" ]; then \
+        docker-compose build; \
+      else \
+        docker build -t ${sanitizedRepoName}:latest .; \
+      fi && \
       cd "$CURRENT_DIR"
     `;
 
