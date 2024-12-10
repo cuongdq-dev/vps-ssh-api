@@ -93,6 +93,52 @@ export class ServerService {
     };
   }
 
+  async cloneRepository(
+    connectionId: string,
+    body: {
+      github_url: string;
+      repository_name: string;
+      fine_grained_token: string;
+      username: string;
+    },
+  ) {
+    const { repository_name, fine_grained_token, github_url, username } = body;
+
+    const baseFolder = 'projects';
+    const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
+
+    const command = `
+      CURRENT_DIR=$(pwd) && \
+      mkdir -p "${baseFolder}" && \
+      cd "${baseFolder}" && \
+      if [ ! -d "${sanitizedRepoName}" ]; then \
+        git clone https://${username}:${fine_grained_token}@${github_url.replace(
+          'https://',
+          '',
+        )} "${sanitizedRepoName}"; \
+      else \
+        cd "${sanitizedRepoName}" && git pull && cd ..; \
+      fi && \
+      cd "${sanitizedRepoName}" && \
+      if [ -f "docker-compose.yml" ]; then \
+        BỎ QUA; \
+      else \
+        TẠO NỘI DUNG CHO FILE DOCKER_COMPOSE.YML \
+      fi && \
+      cd "$CURRENT_DIR"
+    `;
+
+    try {
+      const result = await this.executeTemporaryCommand(
+        connectionId,
+        command.trim(),
+      );
+      return result; //TRẢ VỀ THÔNG TIN IMAGES ĐÃ BUILD
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
   async getService(
     connectionId: string,
     service: string,

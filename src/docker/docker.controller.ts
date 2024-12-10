@@ -23,45 +23,12 @@ export class DockerController {
     return await this.dockerService.listImagesWithStatus(connectionId);
   }
 
-  @Post('image/run/:connectionId')
-  async runImage(
-    @Param('connectionId') connectionId: string,
-    @Body('imageName') imageName: string,
-    @Body('imageId') imageId: string,
-    @Body('imageTag') imageTag: string,
-    @Body('hostPort') hostPort: string,
-    @Body('containerPort') containerPort: string,
-    @Body('containerName') containerName: string,
-    @Body('volumes') volumes?: { hostPath: string; containerPath: string }[],
-    @Body('envVariables') envVariables?: { key: string; value: string }[],
-  ) {
-    const body = {
-      imageName,
-      imageId,
-      containerName,
-      volumes,
-      imageTag,
-      envVariables,
-      hostPort,
-      containerPort,
-    };
-    return await this.dockerService.runImage(connectionId, body);
-  }
-
   @Post('image/build/:connectionId')
   async buildImage(
     @Param('connectionId') connectionId: string,
-    @Body('github_url') github_url: string,
-    @Body('fine_grained_token') fine_grained_token: string,
-    @Body('username') username: string,
-    @Body('repository_name') repository_name: string,
+    @Body() body: Record<string, any>,
   ) {
-    return await this.dockerService.buildImage(connectionId, {
-      fine_grained_token,
-      repository_name,
-      github_url,
-      username,
-    });
+    return await this.dockerService.buildImage(connectionId, body);
   }
 
   @Delete('image/:connectionId/:imageName')

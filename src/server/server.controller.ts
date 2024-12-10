@@ -37,4 +37,20 @@ export class ServerController {
     this.serverService.disconnect(connectionId);
     return `Disconnected ${connectionId}`;
   }
+
+  @Post('repository/clone/:connectionId')
+  async buildImage(
+    @Param('connectionId') connectionId: string,
+    @Body('github_url') github_url: string,
+    @Body('fine_grained_token') fine_grained_token: string,
+    @Body('username') username: string,
+    @Body('repository_name') repository_name: string,
+  ) {
+    return await this.serverService.cloneRepository(connectionId, {
+      fine_grained_token,
+      repository_name,
+      github_url,
+      username,
+    });
+  }
 }

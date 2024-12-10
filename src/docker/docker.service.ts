@@ -66,7 +66,11 @@ export class DockerService {
       const runningContainers = containersResult
         ? containersResult.data.split('\n').map((line) => {
             const [containerId, imageName, containerName] = line.split(' ');
-            return { containerId, imageName, containerName };
+            return {
+              containerId,
+              imageName: imageName.split(':')[0],
+              containerName,
+            };
           })
         : [];
 
@@ -122,7 +126,6 @@ export class DockerService {
       `docker run -d ${hostPort && containerPort ? '-p ' + hostPort + ':' + containerPort : ''} ${containerName ? '--name ' + containerName : ''} ${volumeOptions} ${envOptions} ${imageName}:${imageTag}`.trim();
 
     try {
-      console.log(command);
       const result = await this.serverService.executeTemporaryCommand(
         connectionId,
         command.trim(),
@@ -133,47 +136,95 @@ export class DockerService {
     }
   }
 
-  async buildImage(
-    connectionId: string,
-    body: {
-      github_url: string;
-      repository_name: string;
-      fine_grained_token: string;
-      username: string;
-    },
-  ) {
-    const { repository_name, fine_grained_token, github_url, username } = body;
-
+  async buildImage(connectionId: string, body: Record<string, any>) {
+    const {
+      name: repository_name,
+      fine_grained_token,
+      github_url,
+      username,
+      services,
+      repo_env,
+    } = body;
     const baseFolder = 'projects';
     const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
+    const repoPath = `${baseFolder}/${sanitizedRepoName}`;
 
-    const command = `
+    const generateDockerComposeFile = () => {
+      const dockerComposeConfig = {
+        version: '3.8',
+        services: {},
+      };
+
+      services?.forEach((service: any) => {
+        dockerComposeConfig.services[service.serviceName] = {
+          build: {
+            context: service.buildContext,
+          },
+          env_file: service.envFile,
+          ports: service.ports,
+          environment: service.environment.reduce(
+            (acc: Record<string, string>, env: any) => {
+              acc[env.variable] = env.value;
+              return acc;
+            },
+            {},
+          ),
+          volumes: service.volumes.map(
+            (volume: any) => `${volume.hostPath}:${volume.containerPath}`,
+          ),
+        };
+      });
+
+      return JSON.stringify(dockerComposeConfig, null, 2);
+    };
+
+    const dockerComposeCommand =
+      Number(services?.length) > 0
+        ? `
+      if [ ! -f "docker-compose.yml" ]; then \
+          echo '${generateDockerComposeFile()}' > docker-compose.yml; \
+        fi && \
+      `
+        : '';
+
+    const envCommand = !!repo_env?.trim()
+      ? `
+      if [ ! -f ".env" ]; then \
+        echo '${repo_env.trim()}' > .env; \
+        fi && \
+      `
+      : '';
+
+    const fullCommand = `
       CURRENT_DIR=$(pwd) && \
       mkdir -p "${baseFolder}" && \
       cd "${baseFolder}" && \
       if [ ! -d "${sanitizedRepoName}" ]; then \
-        git clone https://${username}:${fine_grained_token}@${github_url.replace(
-          'https://',
-          '',
-        )} "${sanitizedRepoName}"; \
-      else \
-        cd "${sanitizedRepoName}" && git pull && cd ..; \
+        git clone https://${username}:${fine_grained_token}@${github_url.replace('https://', '')} "${sanitizedRepoName}"; \
       fi && \
-      cd "${sanitizedRepoName}" && \
-      if [ -f "docker-compose.yml" ]; then \
-        docker-compose build; \
+      if [ -d "${sanitizedRepoName}" ]; then \
+        cd "${sanitizedRepoName}" && git pull; \
       else \
-        docker build -t ${sanitizedRepoName}:latest .; \
+        echo "Error: Repository not cloned successfully!" && exit 1; \
       fi && \
-      cd "$CURRENT_DIR"
-    `;
+      ${dockerComposeCommand}
+      ${envCommand}
+        cd "$CURRENT_DIR"
+    `.trim();
 
     try {
-      const result = await this.serverService.executeTemporaryCommand(
+      const execute_result = await this.serverService.executeTemporaryCommand(
         connectionId,
-        command.trim(),
+        fullCommand,
       );
-      return result;
+      return {
+        id: body?.id,
+        server_id: body?.server_id,
+        connectionId: body?.connectionId,
+        server_path: repoPath,
+        pull_status: true,
+        execute_result: execute_result,
+      };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
