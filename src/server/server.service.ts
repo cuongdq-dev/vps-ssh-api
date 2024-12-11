@@ -56,15 +56,13 @@ export class ServerService {
 
     try {
       await temporarySsh.connect(clientConfig);
+      const result = await temporarySsh.execCommand(command, {});
 
-      const result = await temporarySsh.execCommand(command);
-
-      if (result.code !== 0) throw new BadRequestException(result.stderr);
+      if (result.code !== 0 || result.stderr.length > 0)
+        throw new BadRequestException(result.stderr);
       return { status: 200, data: result.stdout.trim() };
     } catch (err) {
-      throw new BadRequestException(
-        `Error executing temporary command: ${err.message || err}`,
-      );
+      throw new BadRequestException(`${err.message || err}`);
     } finally {
       temporarySsh.dispose();
     }

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { stringify } from 'yaml';
 import { ServerService } from '../server/server.service';
 import { RunDockerDto } from './dto/docker.dto';
-
 @Injectable()
 export class DockerService {
   constructor(private readonly serverService: ServerService) {}
@@ -151,72 +151,84 @@ export class DockerService {
 
     const generateDockerComposeFile = () => {
       const dockerComposeConfig = {
-        version: '3.8',
         services: {},
       };
 
       services?.forEach((service: any) => {
+        const volumes = service.volumes
+          ? service.volumes.reduce((acc: string[], volume: any) => {
+              if (volume.hostPath && volume.containerPath) {
+                acc.push(`${volume.hostPath}:${volume.containerPath}`);
+              }
+              return acc;
+            }, [])
+          : [];
+
+        const environment = service.environment
+          ? service.environment.reduce((acc: string[], env: any) => {
+              if (env.variable && env.value) {
+                acc.push(`${env.variable}=${env.value}`);
+              }
+              return acc;
+            }, [])
+          : [];
+
         dockerComposeConfig.services[service.serviceName] = {
           build: {
             context: service.buildContext,
           },
+          image: sanitizedRepoName + '-' + service.serviceName + ':latest',
           env_file: service.envFile,
-          ports: service.ports,
-          environment: service.environment.reduce(
-            (acc: Record<string, string>, env: any) => {
-              acc[env.variable] = env.value;
-              return acc;
-            },
-            {},
-          ),
-          volumes: service.volumes.map(
-            (volume: any) => `${volume.hostPath}:${volume.containerPath}`,
-          ),
+          ports: service.ports ? [service.ports] : [''],
+          volumes: volumes,
+          environment: environment,
         };
+        if (environment.length == 0)
+          delete dockerComposeConfig.services[service.serviceName].environment;
+        if (volumes.length == 0)
+          delete dockerComposeConfig.services[service.serviceName].volumes;
+        if (service.ports == 0)
+          delete dockerComposeConfig.services[service.serviceName].ports;
       });
 
-      return JSON.stringify(dockerComposeConfig, null, 2);
+      return stringify(dockerComposeConfig);
     };
 
     const dockerComposeCommand =
       Number(services?.length) > 0
-        ? `
-      if [ ! -f "docker-compose.yml" ]; then \
-          echo '${generateDockerComposeFile()}' > docker-compose.yml; \
-        fi && \
-      `
+        ? `echo '${generateDockerComposeFile()}' > docker-compose.yml && `
         : '';
 
     const envCommand = !!repo_env?.trim()
-      ? `
-      if [ ! -f ".env" ]; then \
-        echo '${repo_env.trim()}' > .env; \
-        fi && \
-      `
+      ? `echo '${repo_env.trim()}' > .env && `
       : '';
 
     const fullCommand = `
-      CURRENT_DIR=$(pwd) && \
-      mkdir -p "${baseFolder}" && \
-      cd "${baseFolder}" && \
-      if [ ! -d "${sanitizedRepoName}" ]; then \
-        git clone https://${username}:${fine_grained_token}@${github_url.replace('https://', '')} "${sanitizedRepoName}"; \
-      fi && \
-      if [ -d "${sanitizedRepoName}" ]; then \
-        cd "${sanitizedRepoName}" && git pull; \
-      else \
-        echo "Error: Repository not cloned successfully!" && exit 1; \
-      fi && \
-      ${dockerComposeCommand}
-      ${envCommand}
-        cd "$CURRENT_DIR"
-    `.trim();
+    set -e && \
+    CURRENT_DIR=$(pwd) && \
+    mkdir -p "${baseFolder}" && \
+    cd "${baseFolder}" && \
+    if [ ! -d "${sanitizedRepoName}" ]; then \
+      timeout 30s git clone https://${username}:${fine_grained_token}@${github_url.replace('https://', '')} "${sanitizedRepoName}" || { echo "Error: Repository not found" && exit 1; } \
+    fi && \
+    if [ -d "${sanitizedRepoName}" ]; then \
+      cd "${sanitizedRepoName}" && \
+      timeout 30s git pull || { echo "Error: Git pull failed" && exit 1; } \
+    else \
+      echo "Error: Repository not cloned successfully!" && exit 1; \
+    fi && \
+    ${dockerComposeCommand} \
+    ${envCommand} \
+    docker-compose build || { echo "Error: Docker-compose build failed" && exit 1; } && \
+    cd "$CURRENT_DIR" || exit 1
+  `.trim();
 
     try {
       const execute_result = await this.serverService.executeTemporaryCommand(
         connectionId,
         fullCommand,
       );
+
       return {
         id: body?.id,
         server_id: body?.server_id,
@@ -225,6 +237,26 @@ export class DockerService {
         pull_status: true,
         execute_result: execute_result,
       };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async deleteRepository(connectionId: string, { path }: { path: string }) {
+    const checkPathCommand = `if [ -d "${path}" ] || [ -f "${path}" ]; then echo "exists"; else echo "Path ${path} does not exist." >&2; fi`;
+    const deleteCommand = `rm -rf ${path}`;
+
+    try {
+      await this.serverService.executeTemporaryCommand(
+        connectionId,
+        checkPathCommand,
+      );
+
+      const result = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        deleteCommand.trim(),
+      );
+      return result;
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
