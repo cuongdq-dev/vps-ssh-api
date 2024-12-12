@@ -57,7 +57,43 @@ export class DockerController {
     return await this.dockerService.deleteImage(connectionId, imageName);
   }
 
-  // API ACTION CONTAINER
+  // API ACTION IMAGE:
+
+  @Post('image/up/:connectionId')
+  async upDockerImage(
+    @Param('connectionId') connectionId: string,
+    @Body('imageName') imageName: string,
+    @Body('imageId') imageId: string,
+    @Body('serverPath') serverPath: string,
+    @Body('serviceName') serviceName: string,
+  ) {
+    const body = {
+      imageName,
+      imageId,
+      serverPath,
+      serviceName,
+    };
+    return await this.dockerService.upDockerImage(connectionId, body);
+  }
+
+  @Post('image/down/:connectionId')
+  async downDockerImage(
+    @Param('connectionId') connectionId: string,
+    @Body('imageName') imageName: string,
+    @Body('imageId') imageId: string,
+    @Body('serverPath') serverPath: string,
+    @Body('serviceName') serviceName: string,
+  ) {
+    const body = {
+      imageName,
+      imageId,
+      serverPath,
+      serviceName,
+    };
+    return await this.dockerService.downDockerImage(connectionId, body);
+  }
+
+  // API ACTION CONTAINER:
   @Post('container/start/:connectionId/:containerName')
   async startContainer(
     @Param('connectionId') connectionId: string,

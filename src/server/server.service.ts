@@ -29,8 +29,9 @@ export class ServerService {
       throw new BadRequestException('Connection not found');
 
     try {
-      const result = await client.execCommand(command);
-      if (result.code !== 0) throw new BadRequestException(result.stderr);
+      const result = await client.execCommand(command + ' 2>&1');
+      if (result.code !== 0 || result.stderr.length > 0)
+        throw new BadRequestException(result.stderr);
       return { status: 200, data: result.stdout.trim() };
     } catch (err) {
       throw new BadRequestException(`${err.message || err}`);
@@ -56,8 +57,9 @@ export class ServerService {
 
     try {
       await temporarySsh.connect(clientConfig);
-      const result = await temporarySsh.execCommand(command, {});
-
+      const result = await temporarySsh.execCommand(command + ' 2>&1', {});
+      console.log('------->', command, '<---------');
+      console.log('------->', result);
       if (result.code !== 0 || result.stderr.length > 0)
         throw new BadRequestException(result.stderr);
       return { status: 200, data: result.stdout.trim() };

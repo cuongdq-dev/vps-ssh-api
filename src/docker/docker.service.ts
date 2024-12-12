@@ -94,6 +94,42 @@ export class DockerService {
     }
   }
 
+  async detailImageWithStatus(connectionId: string, image: string) {
+    const imageCommand = `docker images --format "{{json .}}" | grep "${image}"`;
+    const containerCommand = `docker ps -a --filter "ancestor=${image}" --format "{{json .}}"`;
+
+    try {
+      const imageResult = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        imageCommand.trim(),
+      );
+
+      const containerResult = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        containerCommand.trim(),
+      );
+
+      const image = JSON.parse(imageResult?.data);
+      const container =
+        containerResult && containerResult.data
+          ? JSON.parse(containerResult?.data)
+          : undefined;
+
+      return {
+        id: image.ID,
+        name: image.Repository,
+        tag: image.Tag,
+        size: image.Size,
+        created: image.CreatedSince,
+        status: !!container ? 'In use' : 'Unused',
+        container_id: container ? container.ID : null,
+        container_name: container ? container.Name : null,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
   async runImage(connectionId: string, body: RunDockerDto) {
     const {
       imageName,
@@ -299,6 +335,85 @@ export class DockerService {
         deleteCommand.trim(),
       );
       return result;
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async upDockerImage(
+    connectionId: string,
+    body: {
+      imageName: string;
+      imageId: string;
+      serverPath: string;
+      serviceName: string;
+    },
+  ) {
+    const command = `cd ${body.serverPath} && docker-compose up ${body.serviceName} -d`;
+    try {
+      const result = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        command.trim(),
+      );
+
+      const detail = await this.detailImageWithStatus(
+        connectionId,
+        body.imageId,
+      );
+
+      return { ...detail };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async downDockerImage(
+    connectionId: string,
+    body: {
+      imageName: string;
+      imageId: string;
+      serverPath: string;
+      serviceName: string;
+    },
+  ) {
+    const command = `cd ${body.serverPath} && docker-compose down ${body.serviceName}`;
+    try {
+      const result = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        command.trim(),
+      );
+      const detail = await this.detailImageWithStatus(
+        connectionId,
+        body.imageId,
+      );
+
+      return { ...detail };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async reBuildDockerImage(
+    connectionId: string,
+    body: {
+      imageName: string;
+      imageId: string;
+      serverPath: string;
+      serviceName: string;
+    },
+  ) {
+    const command = `cd ${body.serverPath} && git pull && docker-compose build ${body.serviceName}`;
+    try {
+      const result = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        command.trim(),
+      );
+      const detail = await this.detailImageWithStatus(
+        connectionId,
+        body.imageId,
+      );
+
+      return { ...detail };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
