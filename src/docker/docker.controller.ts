@@ -31,6 +31,14 @@ export class DockerController {
     return await this.dockerService.buildImage(connectionId, body);
   }
 
+  @Post('repository/clone/:connectionId')
+  async cloneRepository(
+    @Param('connectionId') connectionId: string,
+    @Body() body: Record<string, any>,
+  ) {
+    return await this.dockerService.cloneRepository(connectionId, body);
+  }
+
   @Post('repository/delete/:connectionId')
   async removeRepository(
     @Param('connectionId') connectionId: string,

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { ServerService } from '../server/server.service';
 import { RunDockerDto } from './dto/docker.dto';
 @Injectable()
@@ -64,11 +64,11 @@ export class DockerService {
       );
 
       const runningContainers = containersResult
-        ? containersResult.data.split('\n').map((line) => {
+        ? containersResult?.data?.split('\n')?.map((line) => {
             const [containerId, imageName, containerName] = line.split(' ');
             return {
               containerId,
-              imageName: imageName.split(':')[0],
+              imageName: imageName?.split(':')[0],
               containerName,
             };
           })
@@ -149,54 +149,9 @@ export class DockerService {
     const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
     const repoPath = `${baseFolder}/${sanitizedRepoName}`;
 
-    const generateDockerComposeFile = () => {
-      const dockerComposeConfig = {
-        services: {},
-      };
-
-      services?.forEach((service: any) => {
-        const volumes = service.volumes
-          ? service.volumes.reduce((acc: string[], volume: any) => {
-              if (volume.hostPath && volume.containerPath) {
-                acc.push(`${volume.hostPath}:${volume.containerPath}`);
-              }
-              return acc;
-            }, [])
-          : [];
-
-        const environment = service.environment
-          ? service.environment.reduce((acc: string[], env: any) => {
-              if (env.variable && env.value) {
-                acc.push(`${env.variable}=${env.value}`);
-              }
-              return acc;
-            }, [])
-          : [];
-
-        dockerComposeConfig.services[service.serviceName] = {
-          build: {
-            context: service.buildContext,
-          },
-          image: sanitizedRepoName + '-' + service.serviceName + ':latest',
-          env_file: service.envFile,
-          ports: service.ports ? [service.ports] : [''],
-          volumes: volumes,
-          environment: environment,
-        };
-        if (environment.length == 0)
-          delete dockerComposeConfig.services[service.serviceName].environment;
-        if (volumes.length == 0)
-          delete dockerComposeConfig.services[service.serviceName].volumes;
-        if (service.ports == 0)
-          delete dockerComposeConfig.services[service.serviceName].ports;
-      });
-
-      return stringify(dockerComposeConfig);
-    };
-
     const dockerComposeCommand =
       Number(services?.length) > 0
-        ? `echo '${generateDockerComposeFile()}' > docker-compose.yml && `
+        ? `echo '${this.generateDockerComposeFile(services, sanitizedRepoName)}' > docker-compose.yml && `
         : '';
 
     const envCommand = !!repo_env?.trim()
@@ -229,13 +184,100 @@ export class DockerService {
         fullCommand,
       );
 
+      const getDockerComposeFile =
+        await this.serverService.executeTemporaryCommand(
+          connectionId,
+          `cd ${repoPath} && cat docker-compose.yml`,
+        );
+
+      const parseService = parse(getDockerComposeFile.data);
+
+      const getEnv = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        `cd ${repoPath} && cat docker-compose.yml`,
+      );
+
+      const servicesArr = this.convertFileToJSON(
+        parseService,
+        sanitizedRepoName,
+      );
+
       return {
         id: body?.id,
         server_id: body?.server_id,
         connectionId: body?.connectionId,
         server_path: repoPath,
         pull_status: true,
-        execute_result: execute_result,
+        services: servicesArr,
+        repo_env: getEnv.data,
+        execute_result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`${error.message}`);
+    }
+  }
+
+  async cloneRepository(connectionId: string, body: Record<string, any>) {
+    const {
+      name: repository_name,
+      fine_grained_token,
+      github_url,
+      username,
+    } = body;
+    const baseFolder = 'projects';
+    const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
+    const repoPath = `${baseFolder}/${sanitizedRepoName}`;
+
+    const fullCommand = `
+    set -e && \
+    CURRENT_DIR=$(pwd) && \
+    mkdir -p "${baseFolder}" && \
+    cd "${baseFolder}" && \
+    if [ ! -d "${sanitizedRepoName}" ]; then \
+      timeout 30s git clone https://${username}:${fine_grained_token}@${github_url.replace('https://', '')} "${sanitizedRepoName}" || { echo "Error: Repository not found" && exit 1; } \
+    fi && \
+    if [ -d "${sanitizedRepoName}" ]; then \
+      cd "${sanitizedRepoName}" && \
+      timeout 30s git pull || { echo "Error: Git pull failed" && exit 1; } \
+    else \
+      echo "Error: Repository not cloned successfully!" && exit 1; \
+    fi && \
+    cd "$CURRENT_DIR" || exit 1
+  `.trim();
+
+    try {
+      const execute_result = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        fullCommand,
+      );
+
+      const getDockerComposeFile =
+        await this.serverService.executeTemporaryCommand(
+          connectionId,
+          `cd ${repoPath} && cat docker-compose.yml`,
+        );
+
+      const parseService = parse(getDockerComposeFile.data);
+
+      const getEnv = await this.serverService.executeTemporaryCommand(
+        connectionId,
+        `cd ${repoPath} && cat .env`,
+      );
+
+      const servicesArr = this.convertFileToJSON(
+        parseService,
+        sanitizedRepoName,
+      );
+
+      return {
+        id: body?.id,
+        server_id: body?.server_id,
+        connectionId: body?.connectionId,
+        server_path: repoPath,
+        pull_status: true,
+        services: servicesArr,
+        repo_env: getEnv.data,
+        execute_result,
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
@@ -445,4 +487,83 @@ export class DockerService {
       throw new BadRequestException(`${error.message}`);
     }
   }
+
+  // Helper:
+
+  generateDockerComposeFile = (
+    services: Record<string, any>,
+    sanitizedRepoName: string,
+  ) => {
+    const dockerComposeConfig = {
+      services: {},
+    };
+    services?.forEach((service: any) => {
+      const volumes = service.volumes
+        ? service.volumes.reduce((acc: string[], volume: any) => {
+            if (volume.hostPath && volume.containerPath) {
+              acc.push(`${volume.hostPath}:${volume.containerPath}`);
+            }
+            return acc;
+          }, [])
+        : [];
+
+      const environment = service.environment
+        ? service.environment.reduce((acc: string[], env: any) => {
+            if (env.variable && env.value) {
+              acc.push(`${env.variable}=${env.value}`);
+            }
+            return acc;
+          }, [])
+        : [];
+
+      dockerComposeConfig.services[service.serviceName] = {
+        build: {
+          context: service.buildContext,
+        },
+        image: sanitizedRepoName + '-' + service.serviceName + ':latest',
+        env_file: service.envFile,
+        ports: service.ports ? service.ports : [''],
+        volumes: volumes,
+        environment: environment,
+      };
+      if (environment.length == 0)
+        delete dockerComposeConfig.services[service.serviceName].environment;
+      if (volumes.length == 0)
+        delete dockerComposeConfig.services[service.serviceName].volumes;
+      if (service.ports == 0)
+        delete dockerComposeConfig.services[service.serviceName].ports;
+    });
+
+    return stringify(dockerComposeConfig);
+  };
+
+  convertFileToJSON = (parseService: any, sanitizedRepoName: string) => {
+    return Object.keys(parseService.services)?.map((serviceName: string) => {
+      const service = parseService.services[serviceName];
+
+      return {
+        serviceName,
+        image:
+          service?.image ||
+          sanitizedRepoName +
+            (!!service?.serviceName ? '-' + service?.serviceName : '') +
+            ':latest',
+        buildContext: service?.build?.context,
+        envFile: service?.env_file,
+        ports: service?.ports,
+        environment: service?.environment
+          ? service.environment.map((env: string) => {
+              const [variable, value] = env.split('=');
+              return { variable, value };
+            })
+          : [],
+        volumes: service?.volumes
+          ? service.volumes.map((volume: string) => {
+              const [hostPath, containerPath] = volume.split(':');
+              return { hostPath, containerPath };
+            })
+          : [],
+      };
+    });
+  };
 }
