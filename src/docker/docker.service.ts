@@ -230,7 +230,7 @@ export class DockerService {
 
       const getEnv = await this.serverService.executeTemporaryCommand(
         connectionId,
-        `cd ${repoPath} && cat docker-compose.yml`,
+        `cd ${repoPath} && cat .env`,
       );
 
       const servicesArr = this.convertFileToJSON(
