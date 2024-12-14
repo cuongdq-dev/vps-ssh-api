@@ -11,6 +11,14 @@ export class ServerController {
     return this.serverService.connect(host, username, password, owner_id);
   }
 
+  @Post('setup/service/:connectionId')
+  setupDocker(
+    @Param('connectionId') connectionId: string,
+    @Body() { script }: { script: string },
+  ) {
+    return this.serverService.setupDocker(connectionId, script);
+  }
+
   @Get('status/:connectionId')
   async getServerStatus(@Param('connectionId') connectionId: string) {
     return this.serverService.serverStatus(connectionId);

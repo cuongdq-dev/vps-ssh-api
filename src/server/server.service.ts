@@ -14,7 +14,8 @@ export class ServerService {
   ) {
     try {
       const ssh = new NodeSSH();
-      await ssh.connect({ host, username, password });
+      await ssh.connect({ host, username, password, tryKeyboard: true });
+
       const connectionId = `${owner_id}_${host}_${username}`;
       this.clients[connectionId] = ssh;
       return { status: 200, connectionId: connectionId };
@@ -48,7 +49,7 @@ export class ServerService {
   }
   async executeTemporaryCommand(connectionId: string, command: string) {
     const client = this.clients[connectionId];
-    const clientConfig = client.connection.config as Config;
+    const clientConfig = client?.connection?.config as Config;
 
     if (!client.isConnected())
       throw new BadRequestException('Connection not found');
@@ -61,13 +62,20 @@ export class ServerService {
       console.log('------->', command, '<---------');
       console.log('------->', result);
       if (result.code !== 0 || result.stderr.length > 0)
-        throw new BadRequestException(result.stderr);
+        throw new BadRequestException(result?.stderr);
       return { status: 200, data: result.stdout.trim() };
     } catch (err) {
       throw new BadRequestException(`${err.message || err}`);
     } finally {
       temporarySsh.dispose();
     }
+  }
+
+  async setupDocker(connectionId: string, script: string) {
+    if (!script) throw new BadRequestException('Script not found!');
+    if (!connectionId) throw new BadRequestException('Server disconnected!');
+    const result = await this.executeTemporaryCommand(connectionId, script);
+    return result;
   }
 
   async serverStatus(connectionId: string): Promise<ServerStatusDto> {
@@ -150,7 +158,7 @@ export class ServerService {
     );
     const serviceInfo = await this.executeTemporaryCommand(
       connectionId,
-      `which ${service === 'postgresql' ? 'psql' : service}`,
+      `which ${service}`,
     );
 
     return await this.parseServiceInfo(
