@@ -19,6 +19,33 @@ export class ServerController {
     return this.serverService.setupDocker(connectionId, script);
   }
 
+  @Post('update-docker-compose/:connectionId')
+  updateDockerCompose(
+    @Param('connectionId') connectionId: string,
+    @Body()
+    { values }: { values: Record<string, any>; serviceName: string },
+  ) {
+    return this.serverService.updateDockerCompose(connectionId, values);
+  }
+
+  @Post('update-nginx/:connectionId')
+  updateNginx(
+    @Param('connectionId') connectionId: string,
+    @Body()
+    { fileContent, fileName }: { fileContent?: string; fileName?: string },
+  ) {
+    return this.serverService.updateNginx(connectionId, fileContent, fileName);
+  }
+
+  @Delete('delete-nginx/:connectionId')
+  deleteNginx(
+    @Param('connectionId') connectionId: string,
+    @Body()
+    { fileName }: { fileName?: string },
+  ) {
+    return this.serverService.deleteNginx(connectionId, fileName);
+  }
+
   @Get('status/:connectionId')
   async getServerStatus(@Param('connectionId') connectionId: string) {
     return this.serverService.serverStatus(connectionId);
@@ -32,33 +59,14 @@ export class ServerController {
     return this.serverService.getService(connectionId, service);
   }
 
-  @Post('execute/:connectionId')
-  async execute(
-    @Param('connectionId') connectionId: string,
-    @Body() { command }: { command: string },
-  ) {
-    return this.serverService.executeCommand(connectionId, command);
+  @Post('nginx/:connectionId')
+  async getNginx(@Param('connectionId') connectionId: string) {
+    return this.serverService.getNginx(connectionId);
   }
 
   @Delete('disconnect/:connectionId')
   disconnect(@Param('connectionId') connectionId: string): string {
     this.serverService.disconnect(connectionId);
     return `Disconnected ${connectionId}`;
-  }
-
-  @Post('repository/clone/:connectionId')
-  async buildImage(
-    @Param('connectionId') connectionId: string,
-    @Body('github_url') github_url: string,
-    @Body('fine_grained_token') fine_grained_token: string,
-    @Body('username') username: string,
-    @Body('repository_name') repository_name: string,
-  ) {
-    return await this.serverService.cloneRepository(connectionId, {
-      fine_grained_token,
-      repository_name,
-      github_url,
-      username,
-    });
   }
 }

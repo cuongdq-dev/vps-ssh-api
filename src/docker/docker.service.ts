@@ -13,7 +13,7 @@ export class DockerService {
         connectionId,
         command.trim(),
       );
-      if (!result || !result.data) return [];
+      if (!result || !result.data) return { ...result, data: [] };
 
       const containers = result.data
         .split('\n')
@@ -29,7 +29,7 @@ export class DockerService {
           created_at: container.CreatedSince,
         }));
 
-      return containers;
+      return { ...result, data: containers };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -45,7 +45,8 @@ export class DockerService {
         connectionId,
         imagesCommand.trim(),
       );
-      if (!imagesResult || !imagesResult.data) return [];
+      if (!imagesResult || !imagesResult.data)
+        return { ...imagesResult, data: [] };
 
       const images = imagesResult.data
         .split('\n')
@@ -74,21 +75,26 @@ export class DockerService {
           })
         : [];
 
-      return images.map((image) => {
-        const runningContainer = runningContainers.find(
-          (container) =>
-            container.imageName === image.name ||
-            container.imageName === image.id,
-        );
-        return {
-          ...image,
-          status: runningContainer ? 'In use' : 'Unused',
-          container_id: runningContainer ? runningContainer.containerId : null,
-          container_name: runningContainer
-            ? runningContainer.containerName
-            : null,
-        };
-      });
+      return {
+        ...imagesResult,
+        data: images?.map((image) => {
+          const runningContainer = runningContainers.find(
+            (container) =>
+              container.imageName === image.name ||
+              container.imageName === image.id,
+          );
+          return {
+            ...image,
+            status: runningContainer ? 'In use' : 'Unused',
+            container_id: runningContainer
+              ? runningContainer.containerId
+              : null,
+            container_name: runningContainer
+              ? runningContainer.containerName
+              : null,
+          };
+        }),
+      };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -287,15 +293,15 @@ export class DockerService {
         fullCommand,
       );
 
-      const getDockerComposeFile =
-        await this.serverService.executeTemporaryCommand(
-          connectionId,
-          `cd ${repoPath} && cat docker-compose.yml`,
-        );
+      const getDockerComposeFile = await this.serverService.executeCommand(
+        connectionId,
+        `cd ${repoPath} && cat docker-compose.yml`,
+      );
 
-      const parseService = parse(getDockerComposeFile.data);
+      const parseService =
+        getDockerComposeFile.data && parse(getDockerComposeFile.data);
 
-      const getEnv = await this.serverService.executeTemporaryCommand(
+      const getEnv = await this.serverService.executeCommand(
         connectionId,
         `cd ${repoPath} && cat .env`,
       );
@@ -312,7 +318,7 @@ export class DockerService {
         server_path: repoPath,
         pull_status: true,
         services: servicesArr,
-        repo_env: getEnv.data,
+        repo_env: getEnv?.data || undefined,
         execute_result,
       };
     } catch (error) {
@@ -355,13 +361,11 @@ export class DockerService {
         connectionId,
         command.trim(),
       );
-
       const detail = await this.detailImageWithStatus(
         connectionId,
         body.imageId,
       );
-
-      return { ...detail };
+      return { status: result.status, data: detail, error: result.error };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -386,8 +390,7 @@ export class DockerService {
         connectionId,
         body.imageId,
       );
-
-      return { ...detail };
+      return { status: result.status, data: detail, error: result.error };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -413,7 +416,7 @@ export class DockerService {
         body.imageId,
       );
 
-      return { ...detail };
+      return { ...result, data: detail };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -446,16 +449,19 @@ export class DockerService {
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
-      const container = JSON.parse(result.data.trim());
+      const container = JSON.parse(result?.data);
       return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
+        ...result,
+        data: {
+          id: container?.ID,
+          name: container?.Names,
+          image: container?.Image,
+          ports: container?.Ports,
+          state: container?.State,
+          status: container?.Status,
+          running_for: container?.RunningFor,
+          created_at: container?.CreatedSince,
+        },
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
@@ -479,14 +485,17 @@ export class DockerService {
       const container = JSON.parse(result.data.trim());
 
       return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
+        ...result,
+        data: {
+          id: container?.ID,
+          name: container?.Names,
+          image: container?.Image,
+          ports: container?.Ports,
+          state: container?.State,
+          status: container?.Status,
+          running_for: container?.RunningFor,
+          created_at: container?.CreatedSince,
+        },
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
@@ -510,14 +519,17 @@ export class DockerService {
       const container = JSON.parse(result.data.trim());
 
       return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
+        ...result,
+        data: {
+          id: container?.ID,
+          name: container?.Names,
+          image: container?.Image,
+          ports: container?.Ports,
+          state: container?.State,
+          status: container?.Status,
+          running_for: container?.RunningFor,
+          created_at: container?.CreatedSince,
+        },
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
@@ -539,17 +551,20 @@ export class DockerService {
         `docker ps -a --filter "id=${containerId}" --format "{{json .}}"`,
       );
 
-      const container = JSON.parse(result.data.trim());
+      const container = JSON.parse(result?.data);
 
       return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
+        ...result,
+        data: {
+          id: container?.ID,
+          name: container?.Names,
+          image: container?.Image,
+          ports: container?.Ports,
+          state: container?.State,
+          status: container?.Status,
+          running_for: container?.RunningFor,
+          created_at: container?.CreatedSince,
+        },
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
@@ -560,12 +575,10 @@ export class DockerService {
     const command = `docker rm ${containerId}`;
 
     try {
-      await this.serverService.executeTemporaryCommand(
+      return await this.serverService.executeTemporaryCommand(
         connectionId,
         command.trim(),
       );
-
-      return { status: 200 };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);
     }
@@ -589,14 +602,17 @@ export class DockerService {
       const container = JSON.parse(result.data.trim());
 
       return {
-        id: container.ID,
-        name: container.Names,
-        image: container.Image,
-        ports: container.Ports,
-        state: container.State,
-        status: container.Status,
-        running_for: container.RunningFor,
-        created_at: container.CreatedSince,
+        ...result,
+        data: {
+          id: container?.ID,
+          name: container?.Names,
+          image: container?.Image,
+          ports: container?.Ports,
+          state: container?.State,
+          status: container?.Status,
+          running_for: container?.RunningFor,
+          created_at: container?.CreatedSince,
+        },
       };
     } catch (error) {
       throw new BadRequestException(`${error.message}`);

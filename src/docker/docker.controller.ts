@@ -31,24 +31,6 @@ export class DockerController {
     return await this.dockerService.buildImage(connectionId, body);
   }
 
-  @Post('repository/clone/:connectionId')
-  async cloneRepository(
-    @Param('connectionId') connectionId: string,
-    @Body() body: Record<string, any>,
-  ) {
-    return await this.dockerService.cloneRepository(connectionId, body);
-  }
-
-  @Post('repository/delete/:connectionId')
-  async removeRepository(
-    @Param('connectionId') connectionId: string,
-    @Body() body: Record<string, any>,
-  ) {
-    return await this.dockerService.deleteRepository(connectionId, {
-      path: body?.path,
-    });
-  }
-
   @Delete('image/:connectionId/:imageName')
   async upContainer(
     @Param('connectionId') connectionId: string,
@@ -99,17 +81,7 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.startContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container started successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to start container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.startContainer(connectionId, containerName);
   }
 
   @Post('container/pause/:connectionId/:containerName')
@@ -117,17 +89,7 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.pauseContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container paused successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to pause container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.pauseContainer(connectionId, containerName);
   }
 
   @Post('container/stop/:connectionId/:containerName')
@@ -135,17 +97,7 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.stopContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container stopped successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to stop container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.stopContainer(connectionId, containerName);
   }
 
   @Post('container/restart/:connectionId/:containerName')
@@ -153,17 +105,10 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.restartContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container restarted successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to restart container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.restartContainer(
+      connectionId,
+      containerName,
+    );
   }
 
   @Post('container/resume/:connectionId/:containerName')
@@ -171,17 +116,10 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.resumeContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container resumed successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to restart container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.resumeContainer(
+      connectionId,
+      containerName,
+    );
   }
 
   @Post('container/remove/:connectionId/:containerName')
@@ -189,16 +127,9 @@ export class DockerController {
     @Param('connectionId') connectionId: string,
     @Param('containerName') containerName: string,
   ) {
-    try {
-      const result = await this.dockerService.removeContainer(
-        connectionId,
-        containerName,
-      );
-      return { message: 'Container removed successfully', result };
-    } catch (error) {
-      throw new BadRequestException(
-        `Failed to remove container: ${error.message}`,
-      );
-    }
+    return await this.dockerService.removeContainer(
+      connectionId,
+      containerName,
+    );
   }
 }

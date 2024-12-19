@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Config, NodeSSH } from 'node-ssh';
-import { ServerStatusDto, ServiceStatusDto } from './dto/server.dto';
+import { parse, stringify } from 'yaml';
+import { ServiceStatusDto } from './dto/server.dto';
 
 @Injectable()
 export class ServerService {
@@ -18,24 +19,9 @@ export class ServerService {
 
       const connectionId = `${owner_id}_${host}_${username}`;
       this.clients[connectionId] = ssh;
-      return { status: 200, connectionId: connectionId };
+      return { status: 0, data: { connectionId: connectionId } };
     } catch (err) {
       throw new BadRequestException(err.message || err);
-    }
-  }
-
-  async executeCommand(connectionId: string, command: string) {
-    const client = this.clients[connectionId];
-    if (!client.isConnected())
-      throw new BadRequestException('Connection not found');
-
-    try {
-      const result = await client.execCommand(command + ' 2>&1');
-      if (result.code !== 0 || result.stderr.length > 0)
-        throw new BadRequestException(result.stderr);
-      return { status: 200, data: result.stdout.trim() };
-    } catch (err) {
-      throw new BadRequestException(`${err.message || err}`);
     }
   }
 
@@ -47,6 +33,26 @@ export class ServerService {
       console.log(`SSH connection closed for ${connectionId}`);
     }
   }
+
+  async executeCommand(connectionId: string, command: string) {
+    const client = this.clients[connectionId];
+    if (!client.isConnected())
+      throw new BadRequestException('Connection not found');
+
+    try {
+      const result = await client.execCommand(command + ' 2>&1');
+      console.log('------->', command, '<---------');
+      console.log('------->', result, '<---------');
+      return {
+        status: result.code,
+        data: result?.stdout?.trim(),
+        error: result?.stderr?.trim(),
+      };
+    } catch (err) {
+      throw new BadRequestException(`${err.message || err}`);
+    }
+  }
+
   async executeTemporaryCommand(connectionId: string, command: string) {
     const client = this.clients[connectionId];
     const clientConfig = client?.connection?.config as Config;
@@ -58,12 +64,15 @@ export class ServerService {
 
     try {
       await temporarySsh.connect(clientConfig);
-      const result = await temporarySsh.execCommand(command + ' 2>&1', {});
+      const result = await temporarySsh.execCommand(command);
       console.log('------->', command, '<---------');
-      console.log('------->', result);
-      if (result.code !== 0 || result.stderr.length > 0)
-        throw new BadRequestException(result?.stderr);
-      return { status: 200, data: result.stdout.trim() };
+      console.log('------->', result, '<---------');
+
+      return {
+        status: result.code,
+        data: result?.stdout?.trim(),
+        error: result?.stderr?.trim(),
+      };
     } catch (err) {
       throw new BadRequestException(`${err.message || err}`);
     } finally {
@@ -74,11 +83,41 @@ export class ServerService {
   async setupDocker(connectionId: string, script: string) {
     if (!script) throw new BadRequestException('Script not found!');
     if (!connectionId) throw new BadRequestException('Server disconnected!');
-    const result = await this.executeTemporaryCommand(connectionId, script);
-    return result;
+    return await this.executeTemporaryCommand(
+      connectionId,
+      `echo '${script}' > install-docker.sh && chmod +x install-docker.sh && ./install-docker.sh`,
+    );
   }
 
-  async serverStatus(connectionId: string): Promise<ServerStatusDto> {
+  async updateDockerCompose(connectionId: string, values: Record<string, any>) {
+    if (!values) throw new BadRequestException('Values not found!');
+    if (!connectionId) throw new BadRequestException('Server disconnected!');
+
+    const result = await this.executeTemporaryCommand(
+      connectionId,
+      `echo '${stringify(values)}' > docker-compose.yml && chmod +x docker-compose.yml && docker-compose up -d`,
+    );
+    const service = await this.getService(connectionId, 'docker');
+    return { ...result, data: service.data };
+  }
+
+  async updateNginx(
+    connectionId: string,
+    fileContent: string,
+    fileName: string,
+  ) {
+    const command = `echo '${fileContent.toString()}' > nginx/${fileName}`;
+    const result = await this.executeTemporaryCommand(connectionId, command);
+    return { ...result, data: fileContent };
+  }
+
+  async deleteNginx(connectionId: string, fileName: string) {
+    const command = `rm -rf nginx/${fileName}`;
+    const result = await this.executeTemporaryCommand(connectionId, command);
+    return { ...result };
+  }
+
+  async serverStatus(connectionId: string) {
     const ramCommand = 'free -m';
     const cpuCommand = "top -bn1 | grep 'Cpu(s)'";
     const diskCommand = 'df -h --total | grep total';
@@ -94,79 +133,61 @@ export class ServerService {
     const disk = this.parseDiskInfo(diskInfo.data);
 
     return {
-      categories: ['ram', 'cpu', 'disk'],
-      used: [ram.used, cpu.used, disk.used],
-      available: [ram.available, cpu.available, disk.available],
-      units: ['MB', '%', 'GB'],
+      status: 0,
+      data: {
+        categories: ['ram', 'cpu', 'disk'],
+        used: [ram.used, cpu.used, disk.used],
+        available: [ram.available, cpu.available, disk.available],
+        units: ['MB', '%', 'GB'],
+      },
     };
   }
 
-  async cloneRepository(
-    connectionId: string,
-    body: {
-      github_url: string;
-      repository_name: string;
-      fine_grained_token: string;
-      username: string;
-    },
-  ) {
-    const { repository_name, fine_grained_token, github_url, username } = body;
-
-    const baseFolder = 'projects';
-    const sanitizedRepoName = repository_name.replace(/[^\w\-]/g, '_');
-
-    const command = `
-      CURRENT_DIR=$(pwd) && \
-      mkdir -p "${baseFolder}" && \
-      cd "${baseFolder}" && \
-      if [ ! -d "${sanitizedRepoName}" ]; then \
-        git clone https://${username}:${fine_grained_token}@${github_url.replace(
-          'https://',
-          '',
-        )} "${sanitizedRepoName}"; \
-      else \
-        cd "${sanitizedRepoName}" && git pull && cd ..; \
-      fi && \
-      cd "${sanitizedRepoName}" && \
-      if [ -f "docker-compose.yml" ]; then \
-        BỎ QUA; \
-      else \
-        TẠO NỘI DUNG CHO FILE DOCKER_COMPOSE.YML \
-      fi && \
-      cd "$CURRENT_DIR"
-    `;
-
-    try {
-      const result = await this.executeTemporaryCommand(
-        connectionId,
-        command.trim(),
-      );
-      return result; //TRẢ VỀ THÔNG TIN IMAGES ĐÃ BUILD
-    } catch (error) {
-      throw new BadRequestException(`${error.message}`);
-    }
-  }
-
-  async getService(
-    connectionId: string,
-    service: string,
-  ): Promise<ServiceStatusDto> {
-    const netstatCommand = 'ss -tuln';
-    const netstatInfo = await this.executeTemporaryCommand(
-      connectionId,
-      netstatCommand,
-    );
-    const serviceInfo = await this.executeTemporaryCommand(
+  async getService(connectionId: string, service: string) {
+    const dockerInfo = await this.executeTemporaryCommand(
       connectionId,
       `which ${service}`,
     );
 
-    return await this.parseServiceInfo(
+    const services = await this.executeTemporaryCommand(
       connectionId,
-      service,
-      serviceInfo.data,
-      netstatInfo.data,
+      `cat docker-compose.yml`,
     );
+
+    return {
+      status: 0,
+      data: {
+        name: service,
+        is_installed: !!dockerInfo.data.trim(),
+        is_active: true,
+        port: 'N/A',
+        memory_usage: 'Not found data',
+        service_docker: parse(services?.data),
+      },
+    };
+  }
+  async getNginx(connectionId: string) {
+    const result = await this.executeTemporaryCommand(
+      connectionId,
+      'find nginx -name "*.conf"',
+    );
+
+    const files = result?.data.split('\n').filter((file) => file.trim() !== '');
+    const fileDetails = await Promise.all(
+      files.map(async (file) => {
+        const content = await this.readFileContent(connectionId, file);
+        const fileName = file.split('/')[1];
+        return {
+          name: fileName,
+          content: content,
+        };
+      }),
+    );
+
+    return {
+      ...result,
+      data: fileDetails,
+    };
   }
 
   private parseRamInfo(data: string) {
@@ -241,5 +262,15 @@ export class ServerService {
       port,
       memory_usage: 'Memory Usage - ' + memoryUsage,
     };
+  }
+
+  //Helper
+  async readFileContent(connectionId: string, filePath: string) {
+    const contentResult = await this.executeTemporaryCommand(
+      connectionId,
+      `cat ${filePath}`,
+    );
+
+    return contentResult?.data;
   }
 }
