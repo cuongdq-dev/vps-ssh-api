@@ -21,7 +21,7 @@ export class ServerService {
       this.clients[connectionId] = ssh;
       return { status: 0, data: { connectionId: connectionId } };
     } catch (err) {
-      throw new BadRequestException(err.message || err);
+      return { status: 0, data: { is_connected: false } };
     }
   }
 
@@ -36,7 +36,7 @@ export class ServerService {
 
   async executeCommand(connectionId: string, command: string) {
     const client = this.clients[connectionId];
-    if (!client.isConnected())
+    if (!client?.isConnected())
       throw new BadRequestException('Connection not found');
 
     try {
@@ -57,7 +57,7 @@ export class ServerService {
     const client = this.clients[connectionId];
     const clientConfig = client?.connection?.config as Config;
 
-    if (!client.isConnected())
+    if (!client?.isConnected())
       throw new BadRequestException('Connection not found');
 
     const temporarySsh = new NodeSSH();
@@ -107,8 +107,20 @@ export class ServerService {
     fileName: string,
   ) {
     const command = `echo '${fileContent.toString()}' > nginx/${fileName}`;
-    const result = await this.executeTemporaryCommand(connectionId, command);
-    return { ...result, data: fileContent };
+
+    await this.executeTemporaryCommand(connectionId, command);
+
+    const result = await this.executeTemporaryCommand(
+      connectionId,
+      `find nginx -name "${fileName}"`,
+    );
+
+    const content = await this.readFileContent(connectionId, result.data);
+
+    return {
+      ...result,
+      data: { name: result?.data?.split('/')[1] || fileName, content: content },
+    };
   }
 
   async deleteNginx(connectionId: string, fileName: string) {
@@ -172,18 +184,20 @@ export class ServerService {
       'find nginx -name "*.conf"',
     );
 
-    const files = result?.data.split('\n').filter((file) => file.trim() !== '');
+    const files = result?.data
+      ?.split('\n')
+      .filter((file) => file?.trim() !== '');
+
     const fileDetails = await Promise.all(
-      files.map(async (file) => {
+      files?.map(async (file) => {
         const content = await this.readFileContent(connectionId, file);
-        const fileName = file.split('/')[1];
+        const fileName = file?.split('/')[1];
         return {
           name: fileName,
           content: content,
         };
       }),
     );
-
     return {
       ...result,
       data: fileDetails,
