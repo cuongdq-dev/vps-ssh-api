@@ -11,6 +11,11 @@ export class ServerController {
     return this.serverService.connect(host, username, password, owner_id);
   }
 
+  @Delete('disconnect/:connectionId')
+  async disconnect(@Param('connectionId') connectionId: string) {
+    return this.serverService.disconnect(connectionId);
+  }
+
   @Post('setup/service/:connectionId')
   setupDocker(
     @Param('connectionId') connectionId: string,
@@ -62,11 +67,5 @@ export class ServerController {
   @Post('nginx/:connectionId')
   async getNginx(@Param('connectionId') connectionId: string) {
     return this.serverService.getNginx(connectionId);
-  }
-
-  @Delete('disconnect/:connectionId')
-  disconnect(@Param('connectionId') connectionId: string): string {
-    this.serverService.disconnect(connectionId);
-    return `Disconnected ${connectionId}`;
   }
 }

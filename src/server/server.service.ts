@@ -25,13 +25,15 @@ export class ServerService {
     }
   }
 
-  disconnect(connectionId: string): void {
+  async disconnect(connectionId: string) {
     const client = this.clients[connectionId];
     if (client) {
       client.dispose();
       delete this.clients[connectionId];
       console.log(`SSH connection closed for ${connectionId}`);
+      return { status: 0, data: true };
     }
+    return { status: 0, data: true };
   }
 
   async executeCommand(connectionId: string, command: string) {
